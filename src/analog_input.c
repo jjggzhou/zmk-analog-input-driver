@@ -356,23 +356,34 @@ static void analog_input_async_init(struct k_work *work) {
     }
     
     if (need_calibration) {
-        // 将读取到的实际值重新赋给config中的mv_mid
-        for (uint8_t i = 0; i < config->io_channels_len; i++) {
-            int32_t raw = data->as_buff[i];
-            int32_t mv = raw;
-            struct analog_input_io_channel *ch_cfg = (struct analog_input_io_channel *)&config->io_channels[i];
-            const struct device* adc = ch_cfg->adc_channel.dev;
+        // 先进行一次ADC读取，获取实际的校准值
+        struct adc_sequence* as = &data->as;
+        const struct device* adc = config->io_channels[0].adc_channel.dev;
+        
+        int err = adc_read(adc, as);
+        if (err < 0) {
+            LOG_ERR("ADC read failed during calibration: %d", err);
+        } else {
+            LOG_INF("=== STARTING CALIBRATION ===");
             
-            // 将原始值转换为毫伏
-            adc_raw_to_millivolts(adc_ref_internal(adc), ADC_GAIN_1_6, data->as.resolution, &mv);
-            
-            // 将当前读取到的值重新赋给config中的mv_mid
-            ch_cfg->mv_mid = mv;
-            LOG_INF("=== CALIBRATION RESULT ===");
-            LOG_INF("Updated config: channel %d (ADC ch %d), new mv_mid=%d (raw=%d)", 
-                    i, ch_cfg->adc_channel.channel_id, mv, raw);
+            // 将读取到的实际值重新赋给config中的mv_mid
+            for (uint8_t i = 0; i < config->io_channels_len; i++) {
+                int32_t raw = data->as_buff[i];
+                int32_t mv = raw;
+                struct analog_input_io_channel *ch_cfg = (struct analog_input_io_channel *)&config->io_channels[i];
+                const struct device* adc = ch_cfg->adc_channel.dev;
+                
+                // 将原始值转换为毫伏
+                adc_raw_to_millivolts(adc_ref_internal(adc), ADC_GAIN_1_6, data->as.resolution, &mv);
+                
+                // 将当前读取到的值重新赋给config中的mv_mid
+                ch_cfg->mv_mid = mv;
+                LOG_INF("=== CALIBRATION RESULT ===");
+                LOG_INF("Updated config: channel %d (ADC ch %d), new mv_mid=%d (raw=%d)", 
+                        i, ch_cfg->adc_channel.channel_id, mv, raw);
+            }
+            LOG_INF("=== CALIBRATION COMPLETED ===");
         }
-        LOG_INF("=== CALIBRATION COMPLETED ===");
         
         // 设置校准完成标志，在后续采样中持续输出校准信息
         data->calibration_done = true;
