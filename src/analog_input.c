@@ -74,11 +74,6 @@ static int analog_input_report_data(const struct device *dev) {
 #if IS_ENABLED(CONFIG_ANALOG_INPUT_LOG_DBG_RAW)
         LOG_DBG("AIN%u raw: %d mv: %d", ch_cfg->adc_channel.channel_id, raw, mv);
 #endif
-        // 检查是否为特定值，触发自动校准
-        if (mv == 0x7FFF) {
-            analog_input_auto_calibrate(dev);
-            LOG_INF("Auto calibration triggered by channel %d value 0x7FFF", i);
-        }
         int16_t v = mv - ch_cfg->mv_mid;
         int16_t dz = ch_cfg->mv_deadzone;
         if (dz) {
@@ -326,6 +321,29 @@ static void analog_input_async_init(struct k_work *work) {
     active_set_value(dev, true);
     if (data->sampling_hz) {
         enable_set_value(dev, true);
+    }
+
+    // 在初始化时检查是否需要校准
+    bool need_calibration = false;
+    for (uint8_t i = 0; i < config->io_channels_len; i++) {
+        int32_t raw = data->as_buff[i];
+        int32_t mv = raw;
+        struct analog_input_io_channel *ch_cfg = (struct analog_input_io_channel *)&config->io_channels[i];
+        const struct device* adc = ch_cfg->adc_channel.dev;
+        adc_raw_to_millivolts(adc_ref_internal(adc), ADC_GAIN_1_6, data->as.resolution, &mv);
+        
+        if (mv == 0x7FFF) {
+            need_calibration = true;
+            LOG_INF("Detected 0x7FFF on channel %d during initialization", i);
+            break;
+        }
+    }
+    
+    if (need_calibration) {
+        analog_input_auto_calibrate(dev);
+        LOG_INF("Auto calibration completed during initialization");
+    } else {
+        LOG_INF("No calibration needed during initialization");
     }
 
 }
