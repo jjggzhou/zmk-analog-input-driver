@@ -49,6 +49,10 @@ struct analog_input_data {
     bool calibration_done;
     uint8_t calibration_count;
     uint16_t *calibrated_mv_mid;  // 校准后的mv_mid值数组
+    
+    // 噪声过滤相关字段
+    int16_t *last_stable_values;  // 上次稳定值
+    uint8_t *noise_counter;       // 噪声计数器
 };
 
 struct analog_input_io_channel { 
