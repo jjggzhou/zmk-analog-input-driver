@@ -323,25 +323,35 @@ static void analog_input_async_init(struct k_work *work) {
         enable_set_value(dev, true);
     }
 
-    // 在初始化时检查是否需要校准
+    // 在初始化时检查配置中的mv_mid值，如果为0x7FFF则进行校准
     bool need_calibration = false;
     for (uint8_t i = 0; i < config->io_channels_len; i++) {
-        int32_t raw = data->as_buff[i];
-        int32_t mv = raw;
         struct analog_input_io_channel *ch_cfg = (struct analog_input_io_channel *)&config->io_channels[i];
-        const struct device* adc = ch_cfg->adc_channel.dev;
-        adc_raw_to_millivolts(adc_ref_internal(adc), ADC_GAIN_1_6, data->as.resolution, &mv);
         
-        if (mv == 0x7FFF) {
+        if (ch_cfg->mv_mid == 0x7FFF) {
             need_calibration = true;
-            LOG_INF("Detected 0x7FFF on channel %d during initialization", i);
+            LOG_INF("Detected 0x7FFF in config for channel %d, will perform calibration", i);
             break;
         }
     }
     
     if (need_calibration) {
-        analog_input_auto_calibrate(dev);
-        LOG_INF("Auto calibration completed during initialization");
+        // 将读取到的实际值重新赋给config中的mv_mid
+        for (uint8_t i = 0; i < config->io_channels_len; i++) {
+            int32_t raw = data->as_buff[i];
+            int32_t mv = raw;
+            struct analog_input_io_channel *ch_cfg = (struct analog_input_io_channel *)&config->io_channels[i];
+            const struct device* adc = ch_cfg->adc_channel.dev;
+            
+            // 将原始值转换为毫伏
+            adc_raw_to_millivolts(adc_ref_internal(adc), ADC_GAIN_1_6, data->as.resolution, &mv);
+            
+            // 将当前读取到的值重新赋给config中的mv_mid
+            ch_cfg->mv_mid = mv;
+            LOG_INF("Updated config: channel %d (ADC ch %d), new mv_mid=%d (raw=%d)", 
+                    i, ch_cfg->adc_channel.channel_id, mv, raw);
+        }
+        LOG_INF("Config calibration completed during initialization");
     } else {
         LOG_INF("No calibration needed during initialization");
     }
