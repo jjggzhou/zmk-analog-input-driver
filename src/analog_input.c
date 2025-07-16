@@ -78,13 +78,16 @@ static int analog_input_report_data(const struct device *dev) {
         // 如果刚完成校准，持续输出校准信息
         if (data->calibration_done && data->calibration_count < 100) {
             LOG_INF("=== CALIBRATION INFO (count %d) ===", data->calibration_count);
-            LOG_INF("Channel %d: raw=%d, mv=%d, mv_mid=%d", i, raw, mv, ch_cfg->mv_mid);
+            LOG_INF("Channel %d: raw=%d, mv=%d, config_mv_mid=%d, calibrated_mv_mid=%d", 
+                    i, raw, mv, ch_cfg->mv_mid, data->calibrated_mv_mid[i]);
             if (i == config->io_channels_len - 1) {
                 data->calibration_count++;
             }
         }
         
-        int16_t v = mv - ch_cfg->mv_mid;
+        // 使用校准后的mv_mid值（如果已校准），否则使用配置中的值
+        uint16_t effective_mv_mid = (data->calibration_done) ? data->calibrated_mv_mid[i] : ch_cfg->mv_mid;
+        int16_t v = mv - effective_mv_mid;
         int16_t dz = ch_cfg->mv_deadzone;
         if (dz) {
             if (v > 0) {
@@ -104,8 +107,8 @@ static int analog_input_report_data(const struct device *dev) {
         v = (int16_t)((v * ch_cfg->scale_multiplier) / ch_cfg->scale_divisor);
 
 #if IS_ENABLED(CONFIG_ANALOG_INPUT_LOG_DBG_RAW)
-        LOG_DBG("AIN%u processed: mv=%d, mv_mid=%d, v_before_deadzone=%d, v_after_deadzone=%d, final_v=%d", 
-                ch_cfg->adc_channel.channel_id, mv, ch_cfg->mv_mid, mv - ch_cfg->mv_mid, v, v);
+        LOG_DBG("AIN%u processed: mv=%d, effective_mv_mid=%d, v_before_deadzone=%d, v_after_deadzone=%d, final_v=%d", 
+                ch_cfg->adc_channel.channel_id, mv, effective_mv_mid, mv - effective_mv_mid, v, v);
 #endif
 
         if (ch_cfg->report_on_change_only) {
@@ -311,6 +314,11 @@ static void analog_input_async_init(struct k_work *work) {
     data->as_buff = malloc(buff_size);
     memset(data->as_buff, 0, buff_size);
 
+    // 分配校准后的mv_mid数组
+    uint16_t mv_mid_size = config->io_channels_len * sizeof(uint16_t);
+    data->calibrated_mv_mid = malloc(mv_mid_size);
+    memset(data->calibrated_mv_mid, 0, mv_mid_size);
+
     data->as = (struct adc_sequence){
         .channels = ch_mask,
         .buffer = data->as_buff,
@@ -359,35 +367,43 @@ static void analog_input_async_init(struct k_work *work) {
     }
     
     if (need_calibration) {
-        // 先进行一次ADC读取，获取实际的校准值
-        struct adc_sequence* as = &data->as;
-        const struct device* adc = config->io_channels[0].adc_channel.dev;
-        
         LOG_INF("=== PERFORMING ADC READ FOR CALIBRATION ===");
-        int err = adc_read(adc, as);
-        if (err < 0) {
-            LOG_ERR("ADC read failed during calibration: %d", err);
-        } else {
-            LOG_INF("=== STARTING CALIBRATION ===");
+        
+        // 为每个通道单独读取ADC值
+        for (uint8_t i = 0; i < config->io_channels_len; i++) {
+            struct analog_input_io_channel *ch_cfg = (struct analog_input_io_channel *)&config->io_channels[i];
+            const struct device* adc = ch_cfg->adc_channel.dev;
             
-            // 将读取到的实际值重新赋给config中的mv_mid
-            for (uint8_t i = 0; i < config->io_channels_len; i++) {
-                int32_t raw = data->as_buff[i];
-                int32_t mv = raw;
-                struct analog_input_io_channel *ch_cfg = (struct analog_input_io_channel *)&config->io_channels[i];
-                const struct device* adc = ch_cfg->adc_channel.dev;
-                
-                // 将原始值转换为毫伏
-                adc_raw_to_millivolts(adc_ref_internal(adc), ADC_GAIN_1_6, data->as.resolution, &mv);
-                
-                // 将当前读取到的值重新赋给config中的mv_mid
-                ch_cfg->mv_mid = mv;
-                LOG_INF("=== CALIBRATION RESULT ===");
-                LOG_INF("Updated config: channel %d (ADC ch %d), new mv_mid=%d (raw=%d)", 
-                        i, ch_cfg->adc_channel.channel_id, mv, raw);
+            // 为单个通道创建ADC序列
+            struct adc_sequence single_as = {
+                .channels = BIT(ch_cfg->adc_channel.channel_id),
+                .buffer = &data->as_buff[i],
+                .buffer_size = sizeof(uint16_t),
+                .oversampling = 0,
+                .resolution = 12,
+                .calibrate = false,
+            };
+            
+            LOG_INF("Reading ADC channel %d for calibration", ch_cfg->adc_channel.channel_id);
+            int err = adc_read(adc, &single_as);
+            if (err < 0) {
+                LOG_ERR("ADC read failed for channel %d during calibration: %d", i, err);
+                continue;
             }
-            LOG_INF("=== CALIBRATION COMPLETED ===");
+            
+            int32_t raw = data->as_buff[i];
+            int32_t mv = raw;
+            
+            // 将原始值转换为毫伏
+            adc_raw_to_millivolts(adc_ref_internal(adc), ADC_GAIN_1_6, single_as.resolution, &mv);
+            
+            // 将当前读取到的值存储到data中的calibrated_mv_mid
+            data->calibrated_mv_mid[i] = mv;
+            LOG_INF("=== CALIBRATION RESULT ===");
+            LOG_INF("Updated data: channel %d (ADC ch %d), new mv_mid=%d (raw=%d)", 
+                    i, ch_cfg->adc_channel.channel_id, mv, raw);
         }
+        LOG_INF("=== CALIBRATION COMPLETED ===");
         
         // 设置校准完成标志，在后续采样中持续输出校准信息
         data->calibration_done = true;
@@ -406,7 +422,7 @@ static void analog_input_async_init(struct k_work *work) {
         LOG_INF("=== CALIBRATION SUMMARY ===");
         for (uint8_t i = 0; i < config->io_channels_len; i++) {
             struct analog_input_io_channel *ch_cfg = (struct analog_input_io_channel *)&config->io_channels[i];
-            LOG_INF("Channel %d: mv_mid=%d", i, ch_cfg->mv_mid);
+            LOG_INF("Channel %d: config_mv_mid=%d, calibrated_mv_mid=%d", i, ch_cfg->mv_mid, data->calibrated_mv_mid[i]);
         }
     }
 }

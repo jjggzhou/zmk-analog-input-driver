@@ -48,6 +48,7 @@ struct analog_input_data {
     // 校准相关字段
     bool calibration_done;
     uint8_t calibration_count;
+    uint16_t *calibrated_mv_mid;  // 校准后的mv_mid值数组
 };
 
 struct analog_input_io_channel { 
