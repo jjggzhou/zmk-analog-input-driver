@@ -466,12 +466,20 @@ DT_INST_FOREACH_STATUS_OKAY(ANALOG_INPUT_DEFINE)
 static void analog_input_auto_calibrate(const struct device *dev) {
     struct analog_input_data *data = dev->data;
     const struct analog_input_config *config = dev->config;
+    
+    // 只校准io-channels配置中的通道
     for (uint8_t i = 0; i < config->io_channels_len; i++) {
         int32_t raw = data->as_buff[i];
         int32_t mv = raw;
         struct analog_input_io_channel *ch_cfg = (struct analog_input_io_channel *)&config->io_channels[i];
-        adc_raw_to_millivolts(adc_ref_internal(ch_cfg->adc_channel.dev), ADC_GAIN_1_6, data->as.resolution, &mv);
+        const struct device* adc = ch_cfg->adc_channel.dev;
+        
+        // 将原始值转换为毫伏
+        adc_raw_to_millivolts(adc_ref_internal(adc), ADC_GAIN_1_6, data->as.resolution, &mv);
+        
+        // 将当前读取到的值设置为该通道的mv_mid
         ch_cfg->mv_mid = mv;
-        LOG_INF("Auto calibrated channel %d, new mv_mid=%d", i, mv);
+        LOG_INF("Auto calibrated channel %d (ADC ch %d), new mv_mid=%d (raw=%d)", 
+                i, ch_cfg->adc_channel.channel_id, mv, raw);
     }
 }
