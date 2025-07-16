@@ -18,6 +18,9 @@ LOG_MODULE_REGISTER(ANALOG_INPUT, CONFIG_ANALOG_INPUT_LOG_LEVEL);
 
 #include <zmk/drivers/analog_input.h>
 
+// 自动校准函数声明
+static void analog_input_auto_calibrate(const struct device *dev);
+
 static int analog_input_report_data(const struct device *dev) {
     struct analog_input_data *data = dev->data;
     const struct analog_input_config *config = dev->config;
