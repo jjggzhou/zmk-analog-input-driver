@@ -345,13 +345,15 @@ static void analog_input_async_init(struct k_work *work) {
 
     // 在初始化时检查配置中的mv_mid值，如果为0x7FFF则进行校准
     bool need_calibration = false;
+    LOG_INF("=== CHECKING CALIBRATION NEED ===");
     for (uint8_t i = 0; i < config->io_channels_len; i++) {
         struct analog_input_io_channel *ch_cfg = (struct analog_input_io_channel *)&config->io_channels[i];
+        LOG_INF("Channel %d: checking mv_mid=%d (0x%X)", i, ch_cfg->mv_mid, ch_cfg->mv_mid);
         
-        if (ch_cfg->mv_mid == 0x7FFF) {
+        if (ch_cfg->mv_mid == 32767) {
             need_calibration = true;
             LOG_INF("=== CALIBRATION DETECTED ===");
-            LOG_INF("Detected 0x7FFF in config for channel %d, will perform calibration", i);
+            LOG_INF("Detected 32767 (0x7FFF) in config for channel %d, will perform calibration", i);
             break;
         }
     }
@@ -361,6 +363,7 @@ static void analog_input_async_init(struct k_work *work) {
         struct adc_sequence* as = &data->as;
         const struct device* adc = config->io_channels[0].adc_channel.dev;
         
+        LOG_INF("=== PERFORMING ADC READ FOR CALIBRATION ===");
         int err = adc_read(adc, as);
         if (err < 0) {
             LOG_ERR("ADC read failed during calibration: %d", err);
