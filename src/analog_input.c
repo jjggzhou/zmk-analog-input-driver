@@ -36,8 +36,8 @@ static int analog_input_report_data(const struct device *dev) {
     struct adc_sequence* as = &data->as;
 
     for (uint8_t i = 0; i < config->io_channels_len; i++) {
-        struct analog_input_io_channel ch_cfg = (struct analog_input_io_channel)config->io_channels[i];
-        const struct device* adc = ch_cfg.adc_channel.dev;
+        struct analog_input_io_channel *ch_cfg = (struct analog_input_io_channel *)&config->io_channels[i];
+        const struct device* adc = ch_cfg->adc_channel.dev;
 
         if (i == 0) {
 #ifdef CONFIG_ADC_ASYNC
@@ -69,11 +69,15 @@ static int analog_input_report_data(const struct device *dev) {
         int32_t mv = raw;
         adc_raw_to_millivolts(adc_ref_internal(adc), ADC_GAIN_1_6, as->resolution, &mv);
 #if IS_ENABLED(CONFIG_ANALOG_INPUT_LOG_DBG_RAW)
-        LOG_DBG("AIN%u raw: %d mv: %d", ch_cfg.adc_channel.channel_id, raw, mv);
+        LOG_DBG("AIN%u raw: %d mv: %d", ch_cfg->adc_channel.channel_id, raw, mv);
 #endif
-
-        int16_t v = mv - ch_cfg.mv_mid;
-        int16_t dz = ch_cfg.mv_deadzone;
+        // 检查是否为特定值，触发自动校准
+        if (mv == 0x7FFF) {
+            analog_input_auto_calibrate(dev);
+            LOG_INF("Auto calibration triggered by channel %d value 0x7FFF", i);
+        }
+        int16_t v = mv - ch_cfg->mv_mid;
+        int16_t dz = ch_cfg->mv_deadzone;
         if (dz) {
             if (v > 0) {
                 if (v < dz) v = 0; else v -= dz;
@@ -82,16 +86,16 @@ static int analog_input_report_data(const struct device *dev) {
                 if (v > -dz) v = 0; else v += dz;
             }
         }
-        uint16_t mm = ch_cfg.mv_min_max;
+        uint16_t mm = ch_cfg->mv_min_max;
         if (mm) {
             if (v > 0 && v > mm) v = mm;
             if (v < 0 && v < -mm) v = -mm;
         }
 
-        if (ch_cfg.invert) v *= -1;
-        v = (int16_t)((v * ch_cfg.scale_multiplier) / ch_cfg.scale_divisor);
+        if (ch_cfg->invert) v *= -1;
+        v = (int16_t)((v * ch_cfg->scale_multiplier) / ch_cfg->scale_divisor);
 
-        if (ch_cfg.report_on_change_only) {
+        if (ch_cfg->report_on_change_only) {
             // track raw value to compare until next report interval
             data->delta[i] = v;
         }
@@ -139,7 +143,7 @@ static int analog_input_report_data(const struct device *dev) {
     }
 
     for (uint8_t i = 0; i < config->io_channels_len; i++) {
-        struct analog_input_io_channel ch_cfg = (struct analog_input_io_channel)config->io_channels[i];
+        struct analog_input_io_channel *ch_cfg = (struct analog_input_io_channel *)&config->io_channels[i];
         // LOG_DBG("AIN%u get delta AGAIN", i);
         int32_t dv = data->delta[i];
         int32_t pv = data->prev[i];
@@ -148,14 +152,14 @@ static int analog_input_report_data(const struct device *dev) {
             last_rpt_time = now;
 #endif
             data->delta[i] = 0;
-            if (ch_cfg.report_on_change_only) {
+            if (ch_cfg->report_on_change_only) {
                 data->prev[i] = dv;
             }
 
 #if IS_ENABLED(CONFIG_ANALOG_INPUT_LOG_DBG_REPORT)
-            LOG_DBG("input_report %u rv: %d  e:%d  c:%d", i, dv, ch_cfg.evt_type, ch_cfg.input_code);
+            LOG_DBG("input_report %u rv: %d  e:%d  c:%d", i, dv, ch_cfg->evt_type, ch_cfg->input_code);
 #endif
-            input_report(dev, ch_cfg.evt_type, ch_cfg.input_code, dv, i == idx_to_sync, K_NO_WAIT);
+            input_report(dev, ch_cfg->evt_type, ch_cfg->input_code, dv, i == idx_to_sync, K_NO_WAIT);
         }
     }
     return 0;
@@ -246,9 +250,9 @@ static void analog_input_async_init(struct k_work *work) {
     uint32_t ch_mask = 0;
 
     for (uint8_t i = 0; i < config->io_channels_len; i++) {
-        struct analog_input_io_channel ch_cfg = (struct analog_input_io_channel)config->io_channels[i];
-        const struct device* adc = ch_cfg.adc_channel.dev;
-        uint8_t channel_id = ch_cfg.adc_channel.channel_id;
+        struct analog_input_io_channel *ch_cfg = (struct analog_input_io_channel *)&config->io_channels[i];
+        const struct device* adc = ch_cfg->adc_channel.dev;
+        uint8_t channel_id = ch_cfg->adc_channel.channel_id;
         
         struct adc_channel_cfg channel_cfg = {
             .gain = ADC_GAIN_1_6,
@@ -408,8 +412,8 @@ static int analog_input_channel_get(const struct device *dev, enum sensor_channe
     }
 
     for (uint8_t i = 0; i < config->io_channels_len; i++) {
-        struct analog_input_io_channel ch_cfg = (struct analog_input_io_channel)config->io_channels[i];
-        if (!ch_cfg.report_on_change_only) {
+        struct analog_input_io_channel *ch_cfg = (struct analog_input_io_channel *)&config->io_channels[i];
+        if (!ch_cfg->report_on_change_only) {
             continue;
         }
         if (i == 0)      val->val1 = data->delta[i];
@@ -454,3 +458,17 @@ static const struct sensor_driver_api analog_input_driver_api = {
                           CONFIG_SENSOR_INIT_PRIORITY, &analog_input_driver_api);
 
 DT_INST_FOREACH_STATUS_OKAY(ANALOG_INPUT_DEFINE)
+
+// 自动校准函数：将当前采样值设为mv_mid
+static void analog_input_auto_calibrate(const struct device *dev) {
+    struct analog_input_data *data = dev->data;
+    const struct analog_input_config *config = dev->config;
+    for (uint8_t i = 0; i < config->io_channels_len; i++) {
+        int32_t raw = data->as_buff[i];
+        int32_t mv = raw;
+        struct analog_input_io_channel *ch_cfg = (struct analog_input_io_channel *)&config->io_channels[i];
+        adc_raw_to_millivolts(adc_ref_internal(ch_cfg->adc_channel.dev), ADC_GAIN_1_6, data->as.resolution, &mv);
+        ch_cfg->mv_mid = mv;
+        LOG_INF("Auto calibrated channel %d, new mv_mid=%d", i, mv);
+    }
+}
