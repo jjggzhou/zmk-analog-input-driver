@@ -44,6 +44,10 @@ struct analog_input_data {
     struct k_work sampling_work;
     struct k_timer sampling_timer;
     int err;
+    
+    // 校准相关字段
+    bool calibration_done;
+    uint8_t calibration_count;
 };
 
 struct analog_input_io_channel { 

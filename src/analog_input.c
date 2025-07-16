@@ -74,6 +74,16 @@ static int analog_input_report_data(const struct device *dev) {
 #if IS_ENABLED(CONFIG_ANALOG_INPUT_LOG_DBG_RAW)
         LOG_DBG("AIN%u raw: %d mv: %d", ch_cfg->adc_channel.channel_id, raw, mv);
 #endif
+        
+        // 如果刚完成校准，持续输出校准信息
+        if (data->calibration_done && data->calibration_count < 100) {
+            LOG_INF("=== CALIBRATION INFO (count %d) ===", data->calibration_count);
+            LOG_INF("Channel %d: raw=%d, mv=%d, mv_mid=%d", i, raw, mv, ch_cfg->mv_mid);
+            if (i == config->io_channels_len - 1) {
+                data->calibration_count++;
+            }
+        }
+        
         int16_t v = mv - ch_cfg->mv_mid;
         int16_t dz = ch_cfg->mv_deadzone;
         if (dz) {
@@ -92,6 +102,11 @@ static int analog_input_report_data(const struct device *dev) {
 
         if (ch_cfg->invert) v *= -1;
         v = (int16_t)((v * ch_cfg->scale_multiplier) / ch_cfg->scale_divisor);
+
+#if IS_ENABLED(CONFIG_ANALOG_INPUT_LOG_DBG_RAW)
+        LOG_DBG("AIN%u processed: mv=%d, mv_mid=%d, v_before_deadzone=%d, v_after_deadzone=%d, final_v=%d", 
+                ch_cfg->adc_channel.channel_id, mv, ch_cfg->mv_mid, mv - ch_cfg->mv_mid, v, v);
+#endif
 
         if (ch_cfg->report_on_change_only) {
             // track raw value to compare until next report interval
@@ -158,6 +173,10 @@ static int analog_input_report_data(const struct device *dev) {
             LOG_DBG("input_report %u rv: %d  e:%d  c:%d", i, dv, ch_cfg->evt_type, ch_cfg->input_code);
 #endif
             input_report(dev, ch_cfg->evt_type, ch_cfg->input_code, dv, i == idx_to_sync, K_NO_WAIT);
+        } else {
+#if IS_ENABLED(CONFIG_ANALOG_INPUT_LOG_DBG_REPORT)
+            LOG_DBG("No report for channel %u: dv=%d, pv=%d", i, dv, pv);
+#endif
         }
     }
     return 0;
@@ -330,6 +349,7 @@ static void analog_input_async_init(struct k_work *work) {
         
         if (ch_cfg->mv_mid == 0x7FFF) {
             need_calibration = true;
+            LOG_INF("=== CALIBRATION DETECTED ===");
             LOG_INF("Detected 0x7FFF in config for channel %d, will perform calibration", i);
             break;
         }
@@ -348,10 +368,15 @@ static void analog_input_async_init(struct k_work *work) {
             
             // 将当前读取到的值重新赋给config中的mv_mid
             ch_cfg->mv_mid = mv;
+            LOG_INF("=== CALIBRATION RESULT ===");
             LOG_INF("Updated config: channel %d (ADC ch %d), new mv_mid=%d (raw=%d)", 
                     i, ch_cfg->adc_channel.channel_id, mv, raw);
         }
-        LOG_INF("Config calibration completed during initialization");
+        LOG_INF("=== CALIBRATION COMPLETED ===");
+        
+        // 设置校准完成标志，在后续采样中持续输出校准信息
+        data->calibration_done = true;
+        data->calibration_count = 0;
     } else {
         LOG_INF("No calibration needed during initialization");
     }
