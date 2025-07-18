@@ -89,35 +89,14 @@ static int analog_input_report_data(const struct device *dev) {
         uint16_t effective_mv_mid = (data->calibration_done) ? data->calibrated_mv_mid[i] : ch_cfg->mv_mid;
         int16_t v = mv - effective_mv_mid;
         int16_t dz = ch_cfg->mv_deadzone;
-        
-        // 智能噪声过滤和死区处理
-        int16_t abs_v = (v < 0) ? -v : v;
-        
-        // 噪声过滤：如果值变化很小，可能是噪声
-        int16_t last_stable = data->last_stable_values[i];
-        int16_t diff = abs(v - last_stable);
-        
-        if (abs_v < dz) {
-            // 在死区内
-            if (diff < 3) {  // 变化很小，可能是噪声
-                data->noise_counter[i]++;
-                if (data->noise_counter[i] < 5) {  // 连续5次小变化才认为是噪声
-                    v = last_stable;  // 保持上次的稳定值
-                } else {
-                    v = 0;  // 重置为0
-                    data->last_stable_values[i] = 0;
-                }
-            } else {
-                // 变化较大，可能是真实输入
-                data->noise_counter[i] = 0;
-                data->last_stable_values[i] = v;
+        if (dz) {
+            if (v > 0) {
+                if (v < dz) v = 0; else v -= dz;
             }
-        } else {
-            // 超过死区，认为是有效输入
-            data->noise_counter[i] = 0;
-            data->last_stable_values[i] = v;
+            if (v < 0) {
+                if (v > -dz) v = 0; else v += dz;
+            }
         }
-        
         uint16_t mm = ch_cfg->mv_min_max;
         if (mm) {
             if (v > 0 && v > mm) v = mm;
@@ -128,8 +107,8 @@ static int analog_input_report_data(const struct device *dev) {
         v = (int16_t)((v * ch_cfg->scale_multiplier) / ch_cfg->scale_divisor);
 
 #if IS_ENABLED(CONFIG_ANALOG_INPUT_LOG_DBG_RAW)
-        LOG_DBG("AIN%u processed: mv=%d, effective_mv_mid=%d, v_before_deadzone=%d, v_after_deadzone=%d, final_v=%d, noise_cnt=%d", 
-                ch_cfg->adc_channel.channel_id, mv, effective_mv_mid, mv - effective_mv_mid, v, v, data->noise_counter[i]);
+        LOG_DBG("AIN%u processed: mv=%d, effective_mv_mid=%d, v_before_deadzone=%d, v_after_deadzone=%d, final_v=%d", 
+                ch_cfg->adc_channel.channel_id, mv, effective_mv_mid, mv - effective_mv_mid, v, v);
 #endif
 
         if (ch_cfg->report_on_change_only) {
@@ -137,20 +116,9 @@ static int analog_input_report_data(const struct device *dev) {
             data->delta[i] = v;
         }
         else {
-            // 改进的累积逻辑，防止噪声累积
+            // accumulate delta until report in next iteration
             int32_t delta = data->delta[i];
             int32_t dv = delta + v;
-            
-            // 如果当前值很小且累积值也很小，可能是噪声，重置累积
-            if (abs(v) < 2 && abs(dv) < 5) {
-                dv = 0;
-            }
-            
-            // 防止累积值过大
-            if (abs(dv) > 100) {
-                dv = (dv > 0) ? 100 : -100;
-            }
-            
             data->delta[i] = dv;
         }
     }
@@ -351,15 +319,6 @@ static void analog_input_async_init(struct k_work *work) {
     data->calibrated_mv_mid = malloc(mv_mid_size);
     memset(data->calibrated_mv_mid, 0, mv_mid_size);
 
-    // 分配噪声过滤相关数组
-    uint16_t stable_values_size = config->io_channels_len * sizeof(int16_t);
-    data->last_stable_values = malloc(stable_values_size);
-    memset(data->last_stable_values, 0, stable_values_size);
-
-    uint16_t noise_counter_size = config->io_channels_len * sizeof(uint8_t);
-    data->noise_counter = malloc(noise_counter_size);
-    memset(data->noise_counter, 0, noise_counter_size);
-
     data->as = (struct adc_sequence){
         .channels = ch_mask,
         .buffer = data->as_buff,
@@ -408,13 +367,11 @@ static void analog_input_async_init(struct k_work *work) {
     }
     
     if (need_calibration) {
-        LOG_INF("=== PERFORMING STABLE ADC CALIBRATION ===");
+        LOG_INF("=== WAITING 100ms FOR ADC STABILIZATION BEFORE CALIBRATION ===");
+        k_msleep(100); // 等待100ms让硬件信号稳定
+        LOG_INF("=== PERFORMING ADC READ FOR CALIBRATION ===");
         
-        // 等待ADC硬件稳定
-        LOG_INF("Waiting for ADC hardware to stabilize...");
-        k_sleep(K_MSEC(100));  // 等待100ms让硬件稳定
-        
-        // 为每个通道进行多次采样取平均值
+        // 为每个通道单独读取ADC值
         for (uint8_t i = 0; i < config->io_channels_len; i++) {
             struct analog_input_io_channel *ch_cfg = (struct analog_input_io_channel *)&config->io_channels[i];
             const struct device* adc = ch_cfg->adc_channel.dev;
@@ -429,49 +386,26 @@ static void analog_input_async_init(struct k_work *work) {
                 .calibrate = false,
             };
             
-            LOG_INF("Calibrating channel %d (ADC ch %d) with multiple samples", i, ch_cfg->adc_channel.channel_id);
-            
-            // 进行多次采样取平均值
-            int32_t total_mv = 0;
-            int32_t total_raw = 0;
-            int valid_samples = 0;
-            const int num_samples = 10;  // 采样10次取平均
-            
-            for (int sample = 0; sample < num_samples; sample++) {
-                int err = adc_read(adc, &single_as);
-                if (err < 0) {
-                    LOG_ERR("ADC read failed for channel %d sample %d: %d", i, sample, err);
-                    continue;
-                }
-                
-                int32_t raw = data->as_buff[i];
-                int32_t mv = raw;
-                
-                // 将原始值转换为毫伏
-                adc_raw_to_millivolts(adc_ref_internal(adc), ADC_GAIN_1_6, single_as.resolution, &mv);
-                
-                total_raw += raw;
-                total_mv += mv;
-                valid_samples++;
-                
-                // 短暂延时，避免连续读取
-                k_sleep(K_MSEC(5));
+            LOG_INF("Reading ADC channel %d for calibration", ch_cfg->adc_channel.channel_id);
+            int err = adc_read(adc, &single_as);
+            if (err < 0) {
+                LOG_ERR("ADC read failed for channel %d during calibration: %d", i, err);
+                continue;
             }
             
-            if (valid_samples > 0) {
-                int32_t avg_raw = total_raw / valid_samples;
-                int32_t avg_mv = total_mv / valid_samples;
-                
-                // 将平均值存储到data中的calibrated_mv_mid
-                data->calibrated_mv_mid[i] = avg_mv;
-                LOG_INF("=== CALIBRATION RESULT ===");
-                LOG_INF("Channel %d (ADC ch %d): avg_mv_mid=%d (avg_raw=%d, samples=%d)", 
-                        i, ch_cfg->adc_channel.channel_id, avg_mv, avg_raw, valid_samples);
-            } else {
-                LOG_ERR("No valid samples for channel %d calibration", i);
-            }
+            int32_t raw = data->as_buff[i];
+            int32_t mv = raw;
+            
+            // 将原始值转换为毫伏
+            adc_raw_to_millivolts(adc_ref_internal(adc), ADC_GAIN_1_6, single_as.resolution, &mv);
+            
+            // 将当前读取到的值存储到data中的calibrated_mv_mid
+            data->calibrated_mv_mid[i] = mv;
+            LOG_INF("=== CALIBRATION RESULT ===");
+            LOG_INF("Updated data: channel %d (ADC ch %d), new mv_mid=%d (raw=%d)", 
+                    i, ch_cfg->adc_channel.channel_id, mv, raw);
         }
-        LOG_INF("=== STABLE CALIBRATION COMPLETED ===");
+        LOG_INF("=== CALIBRATION COMPLETED ===");
         
         // 设置校准完成标志，在后续采样中持续输出校准信息
         data->calibration_done = true;
@@ -485,12 +419,6 @@ static void analog_input_async_init(struct k_work *work) {
     // 延时5秒后输出校准信息，确保串口监视器能够捕获
     k_sleep(K_MSEC(5000));
     LOG_INF("=== 5 SECONDS DELAY COMPLETED ===");
-    
-    // 如果进行了校准，再等待一段时间让系统完全稳定
-    if (need_calibration) {
-        LOG_INF("Waiting additional time for system stabilization after calibration...");
-        k_sleep(K_MSEC(2000));  // 额外等待2秒
-    }
     
     if (need_calibration) {
         LOG_INF("=== CALIBRATION SUMMARY ===");
