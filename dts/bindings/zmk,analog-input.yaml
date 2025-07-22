@@ -64,4 +64,3 @@ child-binding:
       type: boolean
       required: false
       description: Auto-save calibration to storage
-      default: true
