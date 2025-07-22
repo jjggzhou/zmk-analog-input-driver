@@ -45,23 +45,23 @@ child-binding:
       type: int
       required: true
 
-    calibration:
-      type: object
+    calibration-samples:
+      type: int
       required: false
-      description: Calibration configuration
-      properties:
-        samples:
-          type: int
-          required: false
-          description: Number of samples for calibration
-          default: 10
-        retries:
-          type: int
-          required: false
-          description: Maximum calibration retries
-          default: 3
-        variance-threshold:
-          type: int
-          required: false
-          description: Maximum allowed variance in mV
-          default: 100
+      description: Number of samples for calibration
+      default: 10
+    calibration-retries:
+      type: int
+      required: false
+      description: Maximum calibration retries
+      default: 3
+    calibration-variance-threshold:
+      type: int
+      required: false
+      description: Maximum allowed variance in mV
+      default: 100
+    calibration-auto-save:
+      type: boolean
+      required: false
+      description: Auto-save calibration to storage
+      default: true
