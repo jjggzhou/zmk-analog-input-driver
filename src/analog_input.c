@@ -431,13 +431,29 @@ static void analog_input_async_init(struct k_work *work) {
 
 static int analog_input_init(const struct device *dev) {
     struct analog_input_data *data = dev->data;
-    // const struct analog_input_config *config = dev->config;
+    const struct analog_input_config *config = dev->config;
     int err = 0;
+
+    // 初始化内存统计
+    memset(&data->mem_stats, 0, sizeof(data->mem_stats));
+
+    // 分配内存资源
+    data->delta = analog_input_safe_malloc(config->io_channels_len * sizeof(int32_t), "delta");
+    data->prev = analog_input_safe_malloc(config->io_channels_len * sizeof(int32_t), "prev");
+    data->as_buff = analog_input_safe_malloc(config->io_channels_len * sizeof(uint16_t), "ADC buffer");
+    data->calibrated_mv_mid = analog_input_safe_malloc(config->io_channels_len * sizeof(uint16_t), "calibration");
+
+    if (!data->delta || !data->prev || !data->as_buff || !data->calibrated_mv_mid) {
+        analog_input_cleanup_resources(dev);
+        return -ENOMEM;
+    }
 
     data->dev = dev;
     k_work_init_delayable(&data->init_work, analog_input_async_init);
     k_work_schedule(&data->init_work, K_MSEC(1));
 
+    LOG_INF("Initialized with %d channels, allocated %zu bytes",
+           config->io_channels_len, data->mem_stats.total_allocated);
     return err;
 }
 
@@ -467,6 +483,24 @@ static int analog_input_attr_set(const struct device *dev, enum sensor_channel c
 
     case ANALOG_INPUT_ATTR_ACTIVE:
         err = active_set_value(dev, ANALOG_INPUT_SVALUE_TO_ACTIVE(*val));
+        break;
+
+    case ANALOG_INPUT_ATTR_CALIBRATE:
+        err = analog_input_enhanced_calibrate(dev, true);
+        break;
+
+    case ANALOG_INPUT_ATTR_CALIBRATION_STATS:
+        LOG_INF("=== CALIBRATION STATISTICS ===");
+        LOG_INF("Total calibrations: %u", data->calibration_stats.total_calibrations);
+        LOG_INF("Successful calibrations: %u", data->calibration_stats.successful_calibrations);
+        LOG_INF("Failed calibrations: %u", data->calibration_stats.failed_calibrations);
+        LOG_INF("Last calibration time: %lld ms ago",
+               k_uptime_get() - data->calibration_stats.last_calibration_time);
+        for (uint8_t i = 0; i < config->io_channels_len; i++) {
+            LOG_INF("Channel %d variance: %u mV", i,
+                   data->calibration_stats.calibration_variance[i]);
+        }
+        err = 0;
         break;
 
     default:
@@ -561,24 +595,126 @@ static const struct sensor_driver_api analog_input_driver_api = {
 
 DT_INST_FOREACH_STATUS_OKAY(ANALOG_INPUT_DEFINE)
 
+// 安全的内存分配函数
+static void* analog_input_safe_malloc(size_t size, const char* purpose) {
+    struct analog_input_data *data = dev->data;
+    void* ptr = malloc(size);
+    if (!ptr) {
+        LOG_ERR("Memory allocation failed for %s (size: %zu)", purpose, size);
+        return NULL;
+    }
+    
+    memset(ptr, 0, size);
+    data->mem_stats.total_allocated += size;
+    data->mem_stats.peak_usage = MAX(data->mem_stats.peak_usage, data->mem_stats.total_allocated);
+    data->mem_stats.allocation_count++;
+    LOG_DBG("Allocated %zu bytes for %s at %p", size, purpose, ptr);
+    return ptr;
+}
+
+// 资源清理函数
+static void analog_input_cleanup_resources(const struct device *dev) {
+    struct analog_input_data *data = dev->data;
+    
+    if (!data) return;
+    
+    LOG_DBG("Cleaning up resources for device %s", dev->name);
+    
+    // 停止所有硬件活动
+    enable_set_value(dev, false);
+    k_timer_stop(&data->sampling_timer);
+    
+    // 释放内存资源
+    size_t ch_count = data->config->io_channels_len;
+    free(data->delta);
+    free(data->prev);
+    free(data->as_buff);
+    free(data->calibrated_mv_mid);
+    
+    // 清理工作队列
+    k_work_cancel(&data->sampling_work);
+    k_work_queue_drain(&analog_input_work_q, false);
+    
+    LOG_INF("Device %s resources cleaned up", dev->name);
+}
+
+// 设备注销函数
+static int analog_input_deinit(const struct device *dev) {
+    analog_input_cleanup_resources(dev);
+    return 0;
+}
+
 // 自动校准函数：将当前采样值设为mv_mid
-static void analog_input_auto_calibrate(const struct device *dev) {
+static int analog_input_enhanced_calibrate(const struct device *dev, bool force_recalibrate) {
     struct analog_input_data *data = dev->data;
     const struct analog_input_config *config = dev->config;
     
-    // 只校准io-channels配置中的通道
-    for (uint8_t i = 0; i < config->io_channels_len; i++) {
-        int32_t raw = data->as_buff[i];
-        int32_t mv = raw;
-        struct analog_input_io_channel *ch_cfg = (struct analog_input_io_channel *)&config->io_channels[i];
-        const struct device* adc = ch_cfg->adc_channel.dev;
-        
-        // 将原始值转换为毫伏
-        adc_raw_to_millivolts(adc_ref_internal(adc), ADC_GAIN_1_6, data->as.resolution, &mv);
-        
-        // 将当前读取到的值设置为该通道的mv_mid
-        ch_cfg->mv_mid = mv;
-        LOG_INF("Auto calibrated channel %d (ADC ch %d), new mv_mid=%d (raw=%d)", 
-                i, ch_cfg->adc_channel.channel_id, mv, raw);
+    if (!force_recalibrate && data->calibration_state == CALIBRATION_COMPLETED) {
+        return 0;
     }
+    
+    data->calibration_state = CALIBRATION_IN_PROGRESS;
+    LOG_INF("=== ENHANCED CALIBRATION STARTED ===");
+    
+    k_msleep(ANALOG_INPUT_STABILIZE_DELAY_MS);
+    
+    for (uint8_t i = 0; i < config->io_channels_len; i++) {
+        struct analog_input_io_channel *ch_cfg = &config->io_channels[i];
+        
+        if (ch_cfg->mv_mid != ANALOG_INPUT_AUTO_CALIBRATE_FLAG && !force_recalibrate) {
+            continue;
+        }
+        
+        uint32_t sum = 0;
+        uint16_t valid_samples = 0;
+        uint16_t min_val = UINT16_MAX;
+        uint16_t max_val = 0;
+        
+        for (int retry = 0; retry < ANALOG_INPUT_CALIBRATE_MAX_RETRIES; retry++) {
+            for (int sample = 0; sample < ANALOG_INPUT_CALIBRATE_SAMPLES; sample++) {
+                int32_t mv;
+                int err = analog_input_read_single_channel(dev, i, &mv);
+                if (err == 0) {
+                    sum += mv;
+                    valid_samples++;
+                    min_val = MIN(min_val, mv);
+                    max_val = MAX(max_val, mv);
+                    k_msleep(10);
+                }
+            }
+            
+            if (valid_samples >= ANALOG_INPUT_CALIBRATE_SAMPLES / 2) {
+                break;
+            }
+            
+            LOG_WRN("Calibration retry %d for channel %d", retry + 1, i);
+            k_msleep(50);
+        }
+        
+        if (valid_samples == 0) {
+            LOG_ERR("Calibration failed for channel %d", i);
+            data->calibration_state = CALIBRATION_FAILED;
+            return -EIO;
+        }
+        
+        uint16_t avg_mv = sum / valid_samples;
+        uint16_t variance = max_val - min_val;
+        
+        if (variance > 100) {
+            LOG_WRN("High variance (%d mV) in calibration", variance);
+        }
+        
+        data->calibrated_mv_mid[i] = avg_mv;
+        data->calibration_stats.calibration_variance[i] = variance;
+        data->calibration_stats.total_calibrations++;
+        
+        LOG_INF("Channel %d calibrated: avg=%d mV, variance=%d", i, avg_mv, variance);
+    }
+    
+    data->calibration_state = CALIBRATION_COMPLETED;
+    data->calibration_stats.successful_calibrations++;
+    data->calibration_stats.last_calibration_time = k_uptime_get();
+    
+    LOG_INF("=== ENHANCED CALIBRATION COMPLETED ===");
+    return 0;
 }

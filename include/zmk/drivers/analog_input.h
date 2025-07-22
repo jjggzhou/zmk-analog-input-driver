@@ -23,6 +23,13 @@
 extern "C" {
 #endif
 
+// 校准相关常量定义
+#define ANALOG_INPUT_AUTO_CALIBRATE_FLAG 32767  // 0x7FFF
+#define ANALOG_INPUT_STABILIZE_DELAY_MS 100     // 校准前稳定时间(ms)
+#define ANALOG_INPUT_CALIBRATE_SAMPLES 10       // 每次校准采样次数
+#define ANALOG_INPUT_CALIBRATE_MAX_RETRIES 3    // 最大校准重试次数
+#define ANALOG_INPUT_CALIBRATE_VARIANCE_THRESHOLD 100  // 最大允许方差(mV)
+
 struct analog_input_data {
     const struct device *dev;
     struct adc_sequence as;
@@ -46,13 +53,32 @@ struct analog_input_data {
     int err;
     
     // 校准相关字段
-    bool calibration_done;
+    enum analog_input_calibration_state {
+        CALIBRATION_NONE = 0,
+        CALIBRATION_PENDING,
+        CALIBRATION_IN_PROGRESS,
+        CALIBRATION_COMPLETED,
+        CALIBRATION_FAILED
+    } calibration_state;
     uint8_t calibration_count;
-    uint16_t *calibrated_mv_mid;  // 校准后的mv_mid值数组
+    uint16_t *calibrated_mv_mid;
     
-    // 噪声过滤相关字段
-    int16_t *last_stable_values;  // 上次稳定值
-    uint8_t *noise_counter;       // 噪声计数器
+    // 校准统计
+    struct {
+        uint32_t total_calibrations;
+        uint32_t successful_calibrations;
+        uint32_t failed_calibrations;
+        int64_t last_calibration_time;
+        uint16_t calibration_variance[CONFIG_ANALOG_INPUT_MAX_CHANNELS];
+    } calibration_stats;
+    
+    // 内存统计
+    struct {
+        size_t total_allocated;
+        size_t peak_usage;
+        uint32_t allocation_count;
+        uint32_t deallocation_count;
+    } mem_stats;
 };
 
 struct analog_input_io_channel { 
@@ -81,6 +107,9 @@ struct analog_input_config {
 
 /** @brief Sensor specific attributes of ANALOG_INPUT. */
 enum analog_input_attribute {
+    // 运行时校准控制
+    ANALOG_INPUT_ATTR_CALIBRATE = 0x100,  // 触发重新校准
+    ANALOG_INPUT_ATTR_CALIBRATION_STATS,  // 获取校准统计信息
 
     // setup polling timer
     ANALOG_INPUT_ATTR_SAMPLING_HZ,

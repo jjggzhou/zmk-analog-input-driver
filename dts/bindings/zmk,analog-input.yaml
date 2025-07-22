@@ -19,6 +19,9 @@ child-binding:
     mv-mid:
       type: int
       required: true
+      description: |
+        Midpoint voltage in mV.
+        Set to 32767 (0x7FFF) to enable auto-calibration.
     mv-min-max:
       type: int
       required: true
@@ -41,3 +44,24 @@ child-binding:
     input-code:
       type: int
       required: true
+
+    calibration:
+      type: object
+      required: false
+      description: Calibration configuration
+      properties:
+        samples:
+          type: int
+          required: false
+          description: Number of samples for calibration
+          default: 10
+        retries:
+          type: int
+          required: false
+          description: Maximum calibration retries
+          default: 3
+        variance-threshold:
+          type: int
+          required: false
+          description: Maximum allowed variance in mV
+          default: 100

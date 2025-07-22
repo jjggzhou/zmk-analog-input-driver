@@ -1,45 +1,36 @@
-# Sensor data simulator
-#
-# Copyright (c) 2019 Nordic Semiconductor
-#
-# SPDX-License-Identifier: LicenseRef-Nordic-5-Clause
-#
-
 menuconfig ANALOG_INPUT
-	bool "ANALOG_INPUT adc sensor"
-  select ADC
-	help
-	  Enable ANALOG_INPUT adc sensor.
+    bool "Analog Input Driver"
+    help
+      Enable analog input driver
 
 if ANALOG_INPUT
 
-config ANALOG_INPUT_WORKQUEUE_PRIORITY
-    int "Workqueue priority"
-    default 10
+config ANALOG_INPUT_MAX_DEVICES
+    int "Maximum number of analog input devices"
+    default 1
     help
-      Priority of thread used by the workqueue
+      Maximum number of analog input devices that can be instantiated
 
-config ANALOG_INPUT_WORKQUEUE_STACK_SIZE
-    int "Workqueue stack size"
-    default 1024
+config ANALOG_INPUT_CALIBRATION
+    bool "Enable runtime calibration support"
+    default y
     help
-      Stack size of thread used by the workqueue
+      Enable runtime calibration functionality for analog inputs
 
-config ANALOG_INPUT_REPORT_INTERVAL_MIN
-	int "ANALOG_INPUT's default minimum report rate"
-	default 0
-	help
-	  Default minimum report interval in milliseconds.
-		Slow down input reporting for hid queue over the air.
+config ANALOG_INPUT_CALIBRATION_LOG_LEVEL
+    int "Calibration log level"
+    default 3 if LOG_DEFAULT_LEVEL=3
+    default 2 if LOG_DEFAULT_LEVEL=2
+    default 1 if LOG_DEFAULT_LEVEL=1
+    default 0
+    help
+      Set log level for calibration module
 
-config ANALOG_INPUT_LOG_DBG_RAW
-	bool "ANALOG_INPUT debug log for RAW mV"
+config ANALOG_INPUT_CALIBRATION_PERSIST
+    bool "Persist calibration data"
+    depends on SETTINGS
+    default y
+    help
+      Enable persistent storage of calibration data
 
-config ANALOG_INPUT_LOG_DBG_REPORT
-	bool "ANALOG_INPUT debug log for REPORT value"
-
-module = ANALOG_INPUT
-module-str = ANALOG_INPUT
-source "${ZEPHYR_BASE}/subsys/logging/Kconfig.template.log_config"
-
-endif #ANALOG_INPUT
+endif # ANALOG_INPUT
