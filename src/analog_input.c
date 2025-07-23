@@ -148,7 +148,7 @@ static int analog_input_report_data(const struct device *dev) {
     }
 
     int8_t idx_to_sync = -1;
-    for (uint8_t i = config->io_channels_len - 1; i >= 0; i--) {
+    for (int8_t i = config->io_channels_len - 1; i >= 0; i--) {
         int32_t dv = data->delta[i];
         int32_t pv = data->prev[i];
         if (dv != pv) {
@@ -459,7 +459,7 @@ static int analog_input_init(const struct device *dev) {
 static int analog_input_attr_set(const struct device *dev, enum sensor_channel chan,
                             enum sensor_attribute attr, const struct sensor_value *val) {
     struct analog_input_data *data = dev->data;
-    // const struct analog_input_config *config = dev->config;
+    const struct analog_input_config *config = dev->config;
     int err;
 
     if (chan != SENSOR_CHAN_ALL) {

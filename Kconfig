@@ -11,6 +11,51 @@ config ANALOG_INPUT_MAX_DEVICES
     help
       Maximum number of analog input devices that can be instantiated
 
+config ANALOG_INPUT_LOG_LEVEL
+    int "Analog Input log level"
+    default 3 if LOG_DEFAULT_LEVEL=3
+    default 2 if LOG_DEFAULT_LEVEL=2
+    default 1 if LOG_DEFAULT_LEVEL=1
+    default 0
+    help
+      Set log level for analog input driver
+
+config ANALOG_INPUT_REPORT_INTERVAL_MIN
+    int "Minimum report interval in milliseconds"
+    default 0
+    help
+      Minimum interval between reports in milliseconds. Set to 0 to disable.
+
+config ANALOG_INPUT_LOG_DBG_RAW
+    bool "Enable raw value debug logging"
+    default n
+    help
+      Enable debug logging of raw ADC values
+
+config ANALOG_INPUT_LOG_DBG_REPORT
+    bool "Enable report debug logging"
+    default n
+    help
+      Enable debug logging of input reports
+
+config ANALOG_INPUT_WORKQUEUE_STACK_SIZE
+    int "Work queue stack size"
+    default 1024
+    help
+      Stack size for the analog input work queue
+
+config ANALOG_INPUT_WORKQUEUE_PRIORITY
+    int "Work queue priority"
+    default 10
+    help
+      Priority for the analog input work queue
+
+config ANALOG_INPUT_MAX_CHANNELS
+    int "Maximum number of channels per device"
+    default 8
+    help
+      Maximum number of analog input channels per device
+
 config ANALOG_INPUT_CALIBRATION
     bool "Enable runtime calibration support"
     default y
