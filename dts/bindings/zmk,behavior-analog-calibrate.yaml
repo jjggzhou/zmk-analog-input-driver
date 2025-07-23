@@ -1,0 +1,21 @@
+# Copyright (c) 2023 The ZMK Contributors
+# SPDX-License-Identifier: MIT
+
+description: |
+  Analog input calibration behavior.
+  
+  This behavior triggers calibration of analog input devices when activated.
+
+compatible: "zmk,behavior-analog-calibrate"
+
+properties:
+  label:
+    type: string
+    required: true
+    description: Unique label for the behavior instance
+
+  #binding-cells:
+    type: int
+    required: true
+    const: 1
+    description: Number of cells in the binding (device index parameter)
