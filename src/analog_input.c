@@ -17,8 +17,6 @@ LOG_MODULE_REGISTER(ANALOG_INPUT, CONFIG_ANALOG_INPUT_LOG_LEVEL);
 
 #include <zmk/drivers/analog_input.h>
 
-// 自动校准函数声明
-static void analog_input_auto_calibrate(const struct device *dev);
 
 static int analog_input_report_data(const struct device *dev) {
     struct analog_input_data *data = dev->data;
@@ -198,7 +196,6 @@ static void sampling_timer_handler(struct k_timer *timer) {
     struct analog_input_data *data = CONTAINER_OF(timer, struct analog_input_data, sampling_timer);
     // LOG_DBG("sampling timer triggered");
     k_work_submit_to_queue(&analog_input_work_q, &data->sampling_work);
-    k_work_submit(&data->sampling_work);
 }
 
 static int active_set_value(const struct device *dev, bool active) {
