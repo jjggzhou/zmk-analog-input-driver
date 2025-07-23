@@ -61,6 +61,7 @@ struct analog_input_data {
         CALIBRATION_FAILED
     } calibration_state;
     uint8_t calibration_count;
+    bool calibration_done;
     uint16_t *calibrated_mv_mid;
     
     // 校准统计

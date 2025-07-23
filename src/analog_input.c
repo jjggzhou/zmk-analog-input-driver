@@ -18,8 +18,12 @@ LOG_MODULE_REGISTER(ANALOG_INPUT, CONFIG_ANALOG_INPUT_LOG_LEVEL);
 
 #include <zmk/drivers/analog_input.h>
 
-// 自动校准函数声明
+// 函数声明
 static void analog_input_auto_calibrate(const struct device *dev);
+static void* analog_input_safe_malloc(const struct device *dev, size_t size, const char* purpose);
+static void analog_input_cleanup_resources(const struct device *dev);
+static int analog_input_enhanced_calibrate(const struct device *dev, bool force_recalibrate);
+static int analog_input_read_single_channel(const struct device *dev, uint8_t channel_idx, int32_t *mv_out);
 
 static int analog_input_report_data(const struct device *dev) {
     struct analog_input_data *data = dev->data;
@@ -438,10 +442,10 @@ static int analog_input_init(const struct device *dev) {
     memset(&data->mem_stats, 0, sizeof(data->mem_stats));
 
     // 分配内存资源
-    data->delta = analog_input_safe_malloc(config->io_channels_len * sizeof(int32_t), "delta");
-    data->prev = analog_input_safe_malloc(config->io_channels_len * sizeof(int32_t), "prev");
-    data->as_buff = analog_input_safe_malloc(config->io_channels_len * sizeof(uint16_t), "ADC buffer");
-    data->calibrated_mv_mid = analog_input_safe_malloc(config->io_channels_len * sizeof(uint16_t), "calibration");
+    data->delta = analog_input_safe_malloc(dev, config->io_channels_len * sizeof(int32_t), "delta");
+    data->prev = analog_input_safe_malloc(dev, config->io_channels_len * sizeof(int32_t), "prev");
+    data->as_buff = analog_input_safe_malloc(dev, config->io_channels_len * sizeof(uint16_t), "ADC buffer");
+    data->calibrated_mv_mid = analog_input_safe_malloc(dev, config->io_channels_len * sizeof(uint16_t), "calibration");
 
     if (!data->delta || !data->prev || !data->as_buff || !data->calibrated_mv_mid) {
         analog_input_cleanup_resources(dev);
@@ -625,7 +629,6 @@ static void analog_input_cleanup_resources(const struct device *dev) {
     k_timer_stop(&data->sampling_timer);
     
     // 释放内存资源
-    size_t ch_count = data->config->io_channels_len;
     free(data->delta);
     free(data->prev);
     free(data->as_buff);
@@ -716,5 +719,40 @@ static int analog_input_enhanced_calibrate(const struct device *dev, bool force_
     data->calibration_stats.last_calibration_time = k_uptime_get();
     
     LOG_INF("=== ENHANCED CALIBRATION COMPLETED ===");
+    return 0;
+}
+
+// 读取单个通道的函数
+static int analog_input_read_single_channel(const struct device *dev, uint8_t channel_idx, int32_t *mv_out) {
+    struct analog_input_data *data = dev->data;
+    const struct analog_input_config *config = dev->config;
+    
+    if (channel_idx >= config->io_channels_len) {
+        return -EINVAL;
+    }
+    
+    struct analog_input_io_channel *ch_cfg = (struct analog_input_io_channel *)&config->io_channels[channel_idx];
+    const struct device* adc = ch_cfg->adc_channel.dev;
+    
+    // 为单个通道创建ADC序列
+    uint16_t buffer;
+    struct adc_sequence single_as = {
+        .channels = BIT(ch_cfg->adc_channel.channel_id),
+        .buffer = &buffer,
+        .buffer_size = sizeof(uint16_t),
+        .oversampling = 0,
+        .resolution = 12,
+        .calibrate = false,
+    };
+    
+    int err = adc_read(adc, &single_as);
+    if (err < 0) {
+        return err;
+    }
+    
+    int32_t mv = buffer;
+    adc_raw_to_millivolts(adc_ref_internal(adc), ADC_GAIN_1_6, single_as.resolution, &mv);
+    *mv_out = mv;
+    
     return 0;
 }
