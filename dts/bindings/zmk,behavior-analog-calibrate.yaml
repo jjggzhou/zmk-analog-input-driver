@@ -9,9 +9,6 @@ description: |
 compatible: "zmk,behavior-analog-calibrate"
 
 properties:
-  label:
-    type: string
-    description: Unique label for the behavior instance
 
   #binding-cells:
     type: int
