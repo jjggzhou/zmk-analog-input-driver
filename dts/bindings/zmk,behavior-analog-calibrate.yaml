@@ -11,6 +11,6 @@ compatible: "zmk,behavior-analog-calibrate"
 properties:
   binding-cells:
     type: int
-    required: true
-    const: 1
+    required: false
+    default: 0
     description: Number of cells in the binding (device index parameter)
