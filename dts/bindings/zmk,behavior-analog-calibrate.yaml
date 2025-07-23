@@ -9,7 +9,6 @@ description: |
 compatible: "zmk,behavior-analog-calibrate"
 
 properties:
-
   #binding-cells:
     type: int
     required: true
