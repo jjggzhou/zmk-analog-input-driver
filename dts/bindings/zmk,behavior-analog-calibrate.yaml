@@ -8,9 +8,4 @@ description: |
 
 compatible: "zmk,behavior-analog-calibrate"
 
-properties:
-  binding-cells:
-    type: int
-    required: true
-    const: 1
-    description: Number of cells in the binding (device index parameter)
+include: one_param.yaml
