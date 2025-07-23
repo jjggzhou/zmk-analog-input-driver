@@ -9,7 +9,6 @@
 #include <zephyr/kernel.h>
 #include <zephyr/sys/byteorder.h>
 #include <zephyr/input/input.h>
-#include <zmk/keymap.h>
 #include <stdlib.h> //for abs()
 #include <zephyr/sys/util.h> // for CLAMP
 
@@ -18,12 +17,8 @@ LOG_MODULE_REGISTER(ANALOG_INPUT, CONFIG_ANALOG_INPUT_LOG_LEVEL);
 
 #include <zmk/drivers/analog_input.h>
 
-// 函数声明
+// 自动校准函数声明
 static void analog_input_auto_calibrate(const struct device *dev);
-static void* analog_input_safe_malloc(const struct device *dev, size_t size, const char* purpose);
-static void analog_input_cleanup_resources(const struct device *dev);
-static int analog_input_enhanced_calibrate(const struct device *dev, bool force_recalibrate);
-static int analog_input_read_single_channel(const struct device *dev, uint8_t channel_idx, int32_t *mv_out);
 
 static int analog_input_report_data(const struct device *dev) {
     struct analog_input_data *data = dev->data;
@@ -442,11 +437,11 @@ static int analog_input_init(const struct device *dev) {
     memset(&data->mem_stats, 0, sizeof(data->mem_stats));
 
     // 分配内存资源
+    // 分配内存资源
     data->delta = analog_input_safe_malloc(dev, config->io_channels_len * sizeof(int32_t), "delta");
     data->prev = analog_input_safe_malloc(dev, config->io_channels_len * sizeof(int32_t), "prev");
     data->as_buff = analog_input_safe_malloc(dev, config->io_channels_len * sizeof(uint16_t), "ADC buffer");
     data->calibrated_mv_mid = analog_input_safe_malloc(dev, config->io_channels_len * sizeof(uint16_t), "calibration");
-
     if (!data->delta || !data->prev || !data->as_buff || !data->calibrated_mv_mid) {
         analog_input_cleanup_resources(dev);
         return -ENOMEM;
@@ -600,7 +595,7 @@ static const struct sensor_driver_api analog_input_driver_api = {
 DT_INST_FOREACH_STATUS_OKAY(ANALOG_INPUT_DEFINE)
 
 // 安全的内存分配函数
-static void* analog_input_safe_malloc(size_t size, const char* purpose) {
+static void* analog_input_safe_malloc(const struct device *dev, size_t size, const char* purpose) {
     struct analog_input_data *data = dev->data;
     void* ptr = malloc(size);
     if (!ptr) {
