@@ -106,24 +106,35 @@ CONFIG_ANALOG_INPUT_LOG_DBG_REPORT=y
 CONFIG_INPUT=y
 ```
 
-## Advanced Features
+## 高级功能
 
-### Auto Calibration
-Set `mv-mid = <32767>` to enable automatic calibration on startup. The driver will:
-1. Take multiple samples to determine the center position
-2. Store calibrated midpoint values in persistent storage
-3. Provide calibration statistics via API
+### 自动校准
+设置 `mv-mid = <32767>` 以启用启动时自动校准。驱动将：
+1. 采集多个样本确定中心位置
+2. 将校准后的中点值存储在持久化存储中
+3. 通过 API 提供校准统计信息
 
-#### Runtime Recalibration via Key Binding
+### 校准参数
 
-Add calibration behavior to your keymap:
+```c
+// 校准相关常量定义
+#define ANALOG_INPUT_AUTO_CALIBRATE_FLAG 32767  // 0x7FFF
+#define ANALOG_INPUT_STABILIZE_DELAY_MS 50      // 校准前稳定时间(ms)
+#define ANALOG_INPUT_CALIBRATE_SAMPLES 5        // 每次校准采样次数
+#define ANALOG_INPUT_CALIBRATE_MAX_RETRIES 2    // 最大校准重试次数
+#define ANALOG_INPUT_CALIBRATE_VARIANCE_THRESHOLD 50  // 最大允许方差(mV)
+```
+
+### 通过按键绑定进行运行时重新校准
+
+在 keymap 中添加校准行为：
+
 ```dts
 / {
     behaviors {
         cal_stick: calibrate_analog_stick {
             compatible = "zmk,behavior-analog-calibrate";
-            label = "CALIBRATE_STICK";
-            #binding-cells = <1>;
+            #binding-cells = <0>;  
         };
     };
 
@@ -131,55 +142,62 @@ Add calibration behavior to your keymap:
         compatible = "zmk,keymap";
         default_layer {
             bindings = <
-                // Other keys...
-                &cal_stick 0  // Parameter: device index (0=first analog input device)
+                // 其他按键...
+                &cal_stick
             >;
         };
     };
 };
 ```
 
-**Parameter Usage:**
-- `0` - Calibrate first analog input device (ANALOG_INPUT_0)
-- `1` - Calibrate second analog input device (ANALOG_INPUT_1)
-- `2` - Calibrate third analog input device (ANALOG_INPUT_2)
-- `255` - Calibrate all analog input devices
+**当前实现说明**：
+- 当前版本仅支持校准设备树中定义的 `anin0` 设备
+- 参数值会被忽略，但为了兼容性仍需提供一个值（通常为0）
+- 校准会强制重新计算中点值并更新校准参数
 
-**Usage Examples:**
+**使用示例**：
 ```dts
-// Single joystick keyboard
-&cal_stick 0    // Calibrate the joystick
-
-// Dual joystick keyboard
-&cal_stick 0    // Calibrate left joystick
-&cal_stick 1    // Calibrate right joystick
-
-// Calibrate all devices at once
-&cal_stick 255  // Calibrate all analog input devices
-```
+// 校准模拟输入设备
+&cal_stick 0  // 参数值任意，当前实现中会被忽略
 ```
 
+**日志输出**：
+- 校准开始时会输出日志：`Calibration triggered for device: anin0`
+- 校准成功：`Calibration completed successfully`
+- 校准失败：`Calibration failed with error: <错误码>`
 
-## Configuration Options
+## 配置选项
 
-### Device Tree Properties
+### 设备树属性
+
 ```dts
 anin0: analog_input_0 {
     compatible = "zmk,analog-input";
-    sampling-hz = <100>;
-    
-    // Calibration settings
-    calibration {
-        samples = <10>;           // Samples per calibration
-        retries = <3>;           // Max retry attempts
-        variance-threshold = <100>; // Max allowed variance (mV)
-        auto-save = <1>;         // Auto-save to storage
-    };
+    sampling-hz = <100>;  // 采样率 (Hz)
     
     x-ch {
-        // Set to 32767 for auto-calibration
+        io-channels = <&adc 7>;  // ADC 通道号
+        // 设置为 32767 启用自动校准
         mv-mid = <32767>;
-        // Other properties...
+        mv-min-max = <800>;      // 最大偏移量 (mV)
+        mv-deadzone = <50>;      // 死区大小 (mV)
+        scale-multiplier = <1>;  // 缩放乘数
+        scale-divisor = <6>;     // 缩放除数
+        evt-type = <INPUT_EV_REL>;  // 事件类型
+        input-code = <INPUT_REL_X>;  // 输入代码
+        report-on-change-only;   // 仅在值变化时报告
+    };
+    
+    y-ch {
+        io-channels = <&adc 6>;  // ADC 通道号
+        mv-mid = <32767>;        // 32767 启用自动校准
+        mv-min-max = <800>;      // 最大偏移量 (mV)
+        mv-deadzone = <50>;      // 死区大小 (mV)
+        scale-multiplier = <1>;  // 缩放乘数
+        scale-divisor = <6>;     // 缩放除数
+        evt-type = <INPUT_EV_REL>;  // 事件类型
+        input-code = <INPUT_REL_Y>;  // 输入代码
+        report-on-change-only;   // 仅在值变化时报告
     };
 };
 ```
