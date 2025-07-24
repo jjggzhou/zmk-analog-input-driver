@@ -13,9 +13,16 @@
 #include <zephyr/sys/util.h> // for CLAMP
 
 #include <zephyr/logging/log.h>
+#include <string.h>
+
 LOG_MODULE_REGISTER(ANALOG_INPUT, CONFIG_ANALOG_INPUT_LOG_LEVEL);
 
 #include <zmk/drivers/analog_input.h>
+
+// Forward declarations
+static void* analog_input_safe_malloc(const struct device *dev, size_t size, const char* purpose);
+static void analog_input_cleanup_resources(const struct device *dev);
+static int analog_input_enhanced_calibrate(const struct device *dev, bool force_recalibrate);
 
 
 static int analog_input_report_data(const struct device *dev) {
@@ -593,7 +600,16 @@ DT_INST_FOREACH_STATUS_OKAY(ANALOG_INPUT_DEFINE)
 
 // 安全的内存分配函数
 static void* analog_input_safe_malloc(const struct device *dev, size_t size, const char* purpose) {
+    if (!dev || !purpose || size == 0) {
+        LOG_ERR("Invalid parameters for memory allocation");
+        return NULL;
+    }
+    
     struct analog_input_data *data = dev->data;
+    if (!data) {
+        LOG_ERR("No device data available");
+        return NULL;
+    }
     void* ptr = malloc(size);
     if (!ptr) {
         LOG_ERR("Memory allocation failed for %s (size: %zu)", purpose, size);
