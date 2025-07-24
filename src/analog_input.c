@@ -20,6 +20,9 @@ LOG_MODULE_REGISTER(ANALOG_INPUT, CONFIG_ANALOG_INPUT_LOG_LEVEL);
 #include <zmk/drivers/analog_input.h>
 
 // Forward declarations
+static int analog_input_read_single_channel(const struct device *dev, uint8_t channel_idx, int32_t *mv_out);
+
+// Forward declarations
 static void* analog_input_safe_malloc(const struct device *dev, size_t size, const char* purpose);
 static void analog_input_cleanup_resources(const struct device *dev);
 static int analog_input_enhanced_calibrate(const struct device *dev, bool force_recalibrate);
@@ -670,7 +673,7 @@ static int analog_input_enhanced_calibrate(const struct device *dev, bool force_
     k_msleep(ANALOG_INPUT_STABILIZE_DELAY_MS);
     
     for (uint8_t i = 0; i < config->io_channels_len; i++) {
-        struct analog_input_io_channel *ch_cfg = &config->io_channels[i];
+        const struct analog_input_io_channel *ch_cfg = &config->io_channels[i];
         
         if (ch_cfg->mv_mid != ANALOG_INPUT_AUTO_CALIBRATE_FLAG && !force_recalibrate) {
             continue;
