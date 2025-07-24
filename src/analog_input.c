@@ -653,7 +653,8 @@ static void analog_input_cleanup_resources(const struct device *dev) {
 }
 
 // 设备注销函数
-static int analog_input_deinit(const struct device *dev) {
+// 注意：此函数当前未被使用，但保留供将来使用
+__attribute__((unused)) static int analog_input_deinit(const struct device *dev) {
     analog_input_cleanup_resources(dev);
     return 0;
 }
@@ -735,7 +736,8 @@ static int analog_input_enhanced_calibrate(const struct device *dev, bool force_
 
 // 读取单个通道的函数
 static int analog_input_read_single_channel(const struct device *dev, uint8_t channel_idx, int32_t *mv_out) {
-    struct analog_input_data *data = dev->data;
+    // data 变量未使用，添加 (void) 避免警告
+    (void)dev->data;
     const struct analog_input_config *config = dev->config;
     
     if (channel_idx >= config->io_channels_len) {
