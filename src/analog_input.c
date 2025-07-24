@@ -421,18 +421,6 @@ static void analog_input_async_init(struct k_work *work) {
     }
 
     LOG_INF("=== ANALOG INPUT INITIALIZATION COMPLETED ===");
-    
-    // 延时5秒后输出校准信息，确保串口监视器能够捕获
-    k_sleep(K_MSEC(5000));
-    LOG_INF("=== 5 SECONDS DELAY COMPLETED ===");
-    
-    if (need_calibration) {
-        LOG_INF("=== CALIBRATION SUMMARY ===");
-        for (uint8_t i = 0; i < config->io_channels_len; i++) {
-            struct analog_input_io_channel *ch_cfg = (struct analog_input_io_channel *)&config->io_channels[i];
-            LOG_INF("Channel %d: config_mv_mid=%d, calibrated_mv_mid=%d", i, ch_cfg->mv_mid, data->calibrated_mv_mid[i]);
-        }
-    }
 }
 
 static int analog_input_init(const struct device *dev) {

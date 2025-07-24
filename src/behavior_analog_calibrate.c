@@ -132,14 +132,24 @@ static int on_keymap_binding_pressed(zmk_behavior_binding_t *binding,
     (void)event;   // 未使用参数
     (void)binding; // 未使用参数
     
-    // 获取模拟输入设备
-    const device_t *analog_dev = device_get_binding("ANALOG_INPUT");
+    // 获取模拟输入设备 - 使用设备树中定义的设备名称
+    const char *device_name = "anin0";
+    const device_t *analog_dev = device_get_binding(device_name);
+    
     if (!analog_dev) {
+        LOG_ERR("Failed to get analog input device: %s", device_name);
         return ZMK_BEHAVIOR_OPAQUE;
     }
     
+    LOG_INF("Calibration triggered for device: %s", device_name);
+    
     // 触发校准，force_recalibrate 设置为 true 强制重新校准
-    (void)analog_input_enhanced_calibrate(analog_dev, true);
+    int ret = analog_input_enhanced_calibrate(analog_dev, true);
+    if (ret != 0) {
+        LOG_ERR("Calibration failed with error: %d", ret);
+    } else {
+        LOG_INF("Calibration completed successfully");
+    }
     
     return ZMK_BEHAVIOR_OPAQUE;
 }
