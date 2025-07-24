@@ -25,10 +25,10 @@ extern "C" {
 
 // 校准相关常量定义
 #define ANALOG_INPUT_AUTO_CALIBRATE_FLAG 32767  // 0x7FFF
-#define ANALOG_INPUT_STABILIZE_DELAY_MS 100     // 校准前稳定时间(ms)
-#define ANALOG_INPUT_CALIBRATE_SAMPLES 10       // 每次校准采样次数
-#define ANALOG_INPUT_CALIBRATE_MAX_RETRIES 3    // 最大校准重试次数
-#define ANALOG_INPUT_CALIBRATE_VARIANCE_THRESHOLD 100  // 最大允许方差(mV)
+#define ANALOG_INPUT_STABILIZE_DELAY_MS 50      // 校准前稳定时间(ms)，从100ms减少到50ms
+#define ANALOG_INPUT_CALIBRATE_SAMPLES 5        // 每次校准采样次数，从10减少到5
+#define ANALOG_INPUT_CALIBRATE_MAX_RETRIES 2    // 最大校准重试次数，从3减少到2
+#define ANALOG_INPUT_CALIBRATE_VARIANCE_THRESHOLD 50  // 最大允许方差(mV)，从100增加到150
 
 struct analog_input_data {
     const struct device *dev;

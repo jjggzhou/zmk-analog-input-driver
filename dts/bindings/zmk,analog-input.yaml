@@ -45,22 +45,8 @@ child-binding:
       type: int
       required: true
 
-    calibration-samples:
-      type: int
-      required: false
-      description: Number of samples for calibration
-      default: 10
-    calibration-retries:
-      type: int
-      required: false
-      description: Maximum calibration retries
-      default: 3
-    calibration-variance-threshold:
-      type: int
-      required: false
-      description: Maximum allowed variance in mV
-      default: 100
-    calibration-auto-save:
-      type: boolean
-      required: false
-      description: Auto-save calibration to storage
+    # 校准参数已移至代码中硬编码
+    # 请参考 analog_input.h 中的定义：
+    # - ANALOG_INPUT_CALIBRATE_SAMPLES
+    # - ANALOG_INPUT_CALIBRATE_MAX_RETRIES
+    # - ANALOG_INPUT_CALIBRATE_VARIANCE_THRESHOLD

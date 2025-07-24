@@ -648,8 +648,6 @@ static void analog_input_cleanup_resources(const struct device *dev) {
     // 清理工作队列
     k_work_cancel(&data->sampling_work);
     k_work_queue_drain(&analog_input_work_q, false);
-    
-    LOG_INF("Device %s resources cleaned up", dev->name);
 }
 
 // 设备注销函数
@@ -669,13 +667,13 @@ static int analog_input_enhanced_calibrate(const struct device *dev, bool force_
     }
     
     data->calibration_state = CALIBRATION_IN_PROGRESS;
-    LOG_INF("=== ENHANCED CALIBRATION STARTED ===");
     
     k_msleep(ANALOG_INPUT_STABILIZE_DELAY_MS);
     
     for (uint8_t i = 0; i < config->io_channels_len; i++) {
         const struct analog_input_io_channel *ch_cfg = &config->io_channels[i];
         
+        // 如果 mv_mid 不是自动校准标志且不强制重新校准，则跳过
         if (ch_cfg->mv_mid != ANALOG_INPUT_AUTO_CALIBRATE_FLAG && !force_recalibrate) {
             continue;
         }
@@ -694,7 +692,7 @@ static int analog_input_enhanced_calibrate(const struct device *dev, bool force_
                     valid_samples++;
                     min_val = MIN(min_val, mv);
                     max_val = MAX(max_val, mv);
-                    k_msleep(10);
+                    k_msleep(5);  // 从10ms减少到5ms
                 }
             }
             
@@ -702,12 +700,10 @@ static int analog_input_enhanced_calibrate(const struct device *dev, bool force_
                 break;
             }
             
-            LOG_WRN("Calibration retry %d for channel %d", retry + 1, i);
-            k_msleep(50);
+            k_msleep(25);  // 从50ms减少到25ms
         }
         
         if (valid_samples == 0) {
-            LOG_ERR("Calibration failed for channel %d", i);
             data->calibration_state = CALIBRATION_FAILED;
             return -EIO;
         }
@@ -715,22 +711,15 @@ static int analog_input_enhanced_calibrate(const struct device *dev, bool force_
         uint16_t avg_mv = sum / valid_samples;
         uint16_t variance = max_val - min_val;
         
-        if (variance > 100) {
-            LOG_WRN("High variance (%d mV) in calibration", variance);
-        }
-        
         data->calibrated_mv_mid[i] = avg_mv;
         data->calibration_stats.calibration_variance[i] = variance;
         data->calibration_stats.total_calibrations++;
-        
-        LOG_INF("Channel %d calibrated: avg=%d mV, variance=%d", i, avg_mv, variance);
     }
     
     data->calibration_state = CALIBRATION_COMPLETED;
     data->calibration_stats.successful_calibrations++;
     data->calibration_stats.last_calibration_time = k_uptime_get();
     
-    LOG_INF("=== ENHANCED CALIBRATION COMPLETED ===");
     return 0;
 }
 

@@ -30,14 +30,13 @@ int analog_input_enhanced_calibrate(const device_t *dev, bool force_recalibrate)
 #define NULL ((void *)0)
 #endif
 
-// 简化日志宏
+// 简化日志宏 - 仅保留错误日志
 #ifndef LOG_ERR
 #define LOG_ERR(fmt, ...) 
 #endif
 
-#ifndef LOG_INF
-#define LOG_INF(fmt, ...) 
-#endif
+// 移除所有信息级别日志
+#define LOG_INF(fmt, ...)
 
 // ZMK 行为绑定结构
 typedef struct zmk_behavior_binding {
@@ -136,20 +135,11 @@ static int on_keymap_binding_pressed(zmk_behavior_binding_t *binding,
     // 获取模拟输入设备
     const device_t *analog_dev = device_get_binding("ANALOG_INPUT");
     if (!analog_dev) {
-        LOG_ERR("Failed to find analog input device");
         return ZMK_BEHAVIOR_OPAQUE;
     }
-    
-    LOG_INF("Starting analog input calibration via cal_stick...");
     
     // 触发校准，force_recalibrate 设置为 true 强制重新校准
-    int err = analog_input_enhanced_calibrate(analog_dev, true);
-    if (err) {
-        LOG_ERR("Analog input calibration failed: %d", err);
-        return ZMK_BEHAVIOR_OPAQUE;
-    }
-    
-    LOG_INF("Analog input calibration completed successfully");
+    (void)analog_input_enhanced_calibrate(analog_dev, true);
     
     return ZMK_BEHAVIOR_OPAQUE;
 }
